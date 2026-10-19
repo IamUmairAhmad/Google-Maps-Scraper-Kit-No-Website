@@ -1,5 +1,6 @@
 """One-click launcher: sets up a private environment once, starts the search, opens Chrome."""
 import os
+import hashlib
 import socket
 import subprocess
 import sys
@@ -25,10 +26,11 @@ def setup() -> None:
         venv.create(VENV, with_pip=True)
     marker = VENV / ".installed"
     reqs = ROOT / "requirements.txt"
-    if not marker.exists() or marker.stat().st_mtime < reqs.stat().st_mtime:
-        print("Installing requirements (first run only)...")
+    digest = hashlib.sha256(reqs.read_bytes()).hexdigest()
+    if not marker.exists() or marker.read_text() != digest:
+        print("Installing requirements (first run or after an update)...")
         subprocess.check_call([str(venv_python()), "-m", "pip", "install", "-q", "-r", str(reqs)])
-        marker.write_text("ok")
+        marker.write_text(digest)
 
 
 def open_chrome_when_ready() -> None:

@@ -1,4 +1,4 @@
-"""Local page for Google Chrome: niche + location in, no-website leads out."""
+"""Local page for Google Chrome: niche + location in, Maps listings out (filter and download by group)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
-from app.leads import slug
-from app.scrape import scrape_no_website_leads
+from app.leads import FILTER_KEYS, filter_rows, result_filename, rows_to_csv, rows_to_xlsx, write_results
+from app.scrape import scrape_places, summary_message
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -37,8 +37,7 @@ def _public_job(job: dict) -> dict:
         "skipped_closed": job.get("skipped_closed", 0),
         "failed": job.get("failed", 0),
         "error": job.get("error", ""),
-        "leads": job.get("leads", []),
-        "csv_name": job.get("csv_name", ""),
+        "rows": job.get("rows", []),
     }
 
 
@@ -64,9 +63,7 @@ def _start_job(niche: str, location: str, limit: int) -> dict:
             "skipped_closed": 0,
             "failed": 0,
             "error": "",
-            "leads": [],
-            "csv": "",
-            "csv_name": f"no-website-{slug(niche)}-{slug(location)}.csv",
+            "rows": [],
         }
         _jobs[job_id] = job
 
@@ -85,23 +82,20 @@ def _start_job(niche: str, location: str, limit: int) -> dict:
                         current[key] = value
 
         try:
-            summary = scrape_no_website_leads(niche, location, limit=limit, on_progress=on_progress)
-            path = Path("results") / job["csv_name"]
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(summary["csv"], encoding="utf-8")
+            summary = scrape_places(niche, location, limit=limit, on_progress=on_progress)
+            write_results(summary["rows"], niche, location)
             with _lock:
                 current = _jobs[job_id]
                 current.update(
                     status="done",
                     phase="done",
-                    leads=summary["leads"],
-                    csv=summary["csv"],
+                    rows=summary["rows"],
                     checked=summary["checked"],
                     found=summary["found"],
                     skipped_website=summary["skipped_website"],
                     skipped_closed=summary["skipped_closed"],
                     failed=summary["failed"],
-                    message=f"Found {summary['found']} active businesses with no website.",
+                    message=summary_message(summary, summary["failed"]),
                 )
         except Exception as exc:
             with _lock:
@@ -142,21 +136,35 @@ class Handler(BaseHTTPRequestHandler):
             page = (STATIC / "index.html").read_bytes()
             self._send(200, page, "text/html; charset=utf-8")
             return
-        if path.startswith("/api/jobs/") and path.endswith(".csv"):
-            job_id = path.removeprefix("/api/jobs/").removesuffix(".csv")
-            with _lock:
-                job = _jobs.get(job_id)
-                csv_text = job.get("csv", "") if job else ""
-                filename = job.get("csv_name", "no-website.csv") if job else ""
-                status = job.get("status") if job else ""
-            if not job:
-                self._json(404, {"error": "Search not found."})
+        for extension, content_type in (
+            ("csv", "text/csv; charset=utf-8"),
+            ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ):
+            if path.startswith("/api/jobs/") and path.endswith("." + extension):
+                job_id = path.removeprefix("/api/jobs/").removesuffix("." + extension)
+                key = (parse_qs(parsed.query).get("filter", ["checked"])[0] or "checked").strip()
+                if key not in FILTER_KEYS:
+                    self._json(400, {"error": "Pick one of: " + ", ".join(FILTER_KEYS) + "."})
+                    return
+                with _lock:
+                    job = _jobs.get(job_id)
+                    rows = list(job.get("rows", [])) if job else []
+                    status = job.get("status") if job else ""
+                    niche = job.get("niche", "") if job else ""
+                    location = job.get("location", "") if job else ""
+                if not job:
+                    self._json(404, {"error": "Search not found."})
+                    return
+                if status != "done":
+                    self._json(409, {"error": "The download is ready when the search finishes."})
+                    return
+                subset = filter_rows(rows, key)
+                if extension == "csv":
+                    body = rows_to_csv(subset).encode("utf-8")
+                else:
+                    body = rows_to_xlsx(subset)
+                self._send(200, body, content_type, result_filename(key, niche, location, extension))
                 return
-            if status != "done":
-                self._json(409, {"error": "The CSV is ready when the search finishes."})
-                return
-            self._send(200, csv_text.encode("utf-8"), "text/csv; charset=utf-8", filename)
-            return
         if path.startswith("/api/jobs/"):
             job_id = path.removeprefix("/api/jobs/")
             with _lock:

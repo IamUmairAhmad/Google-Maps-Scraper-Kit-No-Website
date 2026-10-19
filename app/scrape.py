@@ -1,4 +1,4 @@
-"""Search Google Maps in Google Chrome and keep active businesses with no website."""
+"""Search Google Maps in Google Chrome and read every listing: no website, has website, or closed."""
 
 from __future__ import annotations
 
@@ -7,7 +7,17 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote_plus
 
-from app.leads import business_website, classify_status, keep_lead, review_count_from_panel, rows_to_csv, slug
+from app.leads import (
+    FILTER_KEYS,
+    business_website,
+    classify_status,
+    count_results,
+    filter_rows,
+    review_count_from_panel,
+    rows_to_csv,
+    with_result,
+    write_results,
+)
 
 Progress = Callable[[dict], None]
 
@@ -60,18 +70,20 @@ def search_url(niche: str, location: str) -> str:
     return "https://www.google.com/maps/search/" + quote_plus(query)
 
 
-def scrape_no_website_leads(
+def scrape_places(
     niche: str,
     location: str,
     limit: int = 120,
     on_progress: Progress | None = None,
     headless: bool = False,
 ) -> dict:
-    """Open Maps in Chrome, scroll one search, and return active no-website leads.
+    """Open Maps in Chrome, scroll one search, and read every listing it opens.
 
+    Each row is labelled No website, Has website, or Closed. Nothing is dropped:
+    the page filters the rows and downloads whichever group you pick.
     One Maps search tops out near 120 listings. `limit` caps how many of those
-    listings are opened. Email lookup stays off: these businesses have no site
-    to read, and social profiles are skipped for the same reason.
+    listings are opened. Email lookup stays off: no site is opened, and social
+    profiles do not count as a website.
     """
     niche = niche.strip()
     location = location.strip()
@@ -87,10 +99,9 @@ def scrape_no_website_leads(
 
     from playwright.sync_api import sync_playwright
 
-    matches: list[dict] = []
-    skipped_website = 0
-    skipped_closed = 0
+    rows: list[dict] = []
     failed = 0
+    links: list[dict] = []
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
@@ -113,7 +124,7 @@ def scrape_no_website_leads(
             links = _scroll_feed(page, limit, progress)
             progress(
                 phase="checking",
-                message=f"Checking {len(links)} listings for a website.",
+                message=f"Checking {len(links)} listings.",
                 checked=0,
                 found=0,
                 total=len(links),
@@ -121,46 +132,48 @@ def scrape_no_website_leads(
             )
             for index, link in enumerate(links, start=1):
                 try:
-                    row = _read_place(page, link["href"], niche, location, link.get("name", ""))
+                    rows.append(with_result(_read_place(page, link["href"], niche, location, link.get("name", ""))))
                 except Exception:
                     failed += 1
-                    row = None
-                if row is not None:
-                    if keep_lead(row):
-                        matches.append(row)
-                    elif row["status"] != "active":
-                        skipped_closed += 1
-                    else:
-                        skipped_website += 1
                 progress(
                     phase="checking",
                     message=f"Checked {index} of {len(links)}.",
-                    checked=index,
-                    found=len(matches),
                     total=len(links),
-                    skipped_website=skipped_website,
-                    skipped_closed=skipped_closed,
+                    failed=failed,
+                    rows=list(rows),
                     limit=limit,
+                    **count_results(rows),
                 )
         finally:
             context.close()
             browser.close()
 
+    counts = count_results(rows)
     summary = {
         "niche": niche,
         "location": location,
-        "checked": len(links) if "links" in locals() else 0,
-        "found": len(matches),
-        "skipped_website": skipped_website,
-        "skipped_closed": skipped_closed,
         "failed": failed,
-        "leads": matches,
-        "csv": rows_to_csv(matches),
+        "rows": rows,
+        **counts,
     }
-    progress(phase="done", message=f"Found {len(matches)} active businesses with no website.", **{
-        key: summary[key] for key in ("checked", "found", "skipped_website", "skipped_closed", "failed")
-    })
+    progress(
+        phase="done",
+        message=summary_message(counts, failed),
+        failed=failed,
+        rows=list(rows),
+        **counts,
+    )
     return summary
+
+
+def summary_message(counts: dict, failed: int = 0) -> str:
+    text = (
+        f"Checked {counts['checked']}: {counts['found']} no website, "
+        f"{counts['skipped_website']} has website, {counts['skipped_closed']} closed."
+    )
+    if failed:
+        text += f" {failed} could not be read."
+    return text
 
 
 def _dismiss_consent(page) -> None:
@@ -247,30 +260,31 @@ def _read_place(page, href: str, niche: str, location: str, fallback_name: str) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Find active Maps businesses with no website.")
+    parser = argparse.ArgumentParser(description="Read Google Maps listings: no website, has website, closed.")
     parser.add_argument("--niche", required=True)
     parser.add_argument("--location", required=True)
     parser.add_argument("--limit", type=int, default=30)
-    parser.add_argument("--out", default="")
+    parser.add_argument("--only", choices=FILTER_KEYS, default="", help="Save just this group to --out.")
+    parser.add_argument("--out", default="", help="CSV path used with --only.")
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
-    summary = scrape_no_website_leads(
+    summary = scrape_places(
         args.niche,
         args.location,
         limit=args.limit,
         headless=not args.headed,
         on_progress=lambda event: print(event.get("message", ""), flush=True),
     )
-    out = Path(args.out) if args.out else Path("results") / f"no-website-{slug(args.niche)}-{slug(args.location)}.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(summary["csv"], encoding="utf-8")
-    print(
-        f"Checked {summary['checked']}. "
-        f"Active with no website: {summary['found']}. "
-        f"Has website: {summary['skipped_website']}. "
-        f"Closed: {summary['skipped_closed']}. "
-        f"Saved {out}"
-    )
+    if args.only and args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(rows_to_csv(filter_rows(summary["rows"], args.only)), encoding="utf-8")
+        saved = [out]
+    else:
+        saved = write_results(summary["rows"], args.niche, args.location)
+    print(summary_message(summary, summary["failed"]))
+    for path in saved:
+        print(f"Saved {path}")
 
 
 if __name__ == "__main__":

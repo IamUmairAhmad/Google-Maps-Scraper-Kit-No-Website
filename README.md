@@ -1,8 +1,21 @@
-# No-website Google Maps search
+# Google Maps business search
 
-Open a local page in Google Chrome, enter a niche and a location, and download a CSV of active businesses that do not have a website.
+Open a local page in Google Chrome, enter a niche and a location, and download CSV or Excel files of the Google Maps listings it finds. Every listing is read and sorted into one of three groups:
 
-A Google Chrome window opens for the search. Closed and temporarily closed listings are dropped. A Facebook, Instagram, or other profile link does not count as a website. Email stays blank because there is no site to read. One Maps search usually stops around 120 listings.
+- **No website**: operating business, no website on Maps. A Facebook, Instagram, or other profile link does not count as a website.
+- **Has website**: operating business with a real website.
+- **Closed**: permanently or temporarily closed.
+
+The page shows four buttons with counts:
+
+| Button | Shows and downloads |
+| --- | --- |
+| Checked | Every listing that was read |
+| No website | Only active businesses with no website |
+| Has website | Only active businesses with a website |
+| Closed | Only closed businesses |
+
+Pick a button, then use **Download CSV** or **Download Excel**. The file holds just that group. In the Excel file each Name is a clickable link to its Google Maps listing (CSV files keep the link in the `maps_url` column). Email stays blank because no website is opened. One Maps search usually stops around 120 listings.
 
 ## One-click launch
 
@@ -30,6 +43,6 @@ The same search from the terminal:
 .venv/bin/python -m app.scrape --niche "plumbers" --location "Austin, TX" --limit 25
 ```
 
-The CSV is saved under `results/`.
+This saves one CSV per group under `results/` (`all-checked-…`, `no-website-…`, `has-website-…`, `closed-…`). Add `--only no_website --out my-file.csv` to save a single group.
 
 Scraping Google Maps can temporarily rate-limit the machine’s IP. Run one search at a time. Treat phones as personal data and follow the contact rules that apply to you.

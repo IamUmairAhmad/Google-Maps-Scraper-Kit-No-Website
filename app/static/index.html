@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>No-website businesses</title>
+  <title>Google Maps business search</title>
   <style>
     :root {
       color-scheme: light;
@@ -68,13 +68,19 @@
     .hint { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
     .status { margin-top: 16px; }
     .counts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-    .counts span {
+    .chip {
       background: white;
+      color: var(--ink);
       border: 1px solid var(--line);
       border-radius: 999px;
-      padding: 6px 10px;
+      padding: 7px 14px;
       font-size: 13px;
+      font-weight: 600;
     }
+    .chip:hover { border-color: var(--green); }
+    .chip[aria-pressed="true"] { background: var(--green); color: var(--green-ink); border-color: var(--green); }
+    .downloads { display: flex; flex-wrap: wrap; gap: 14px; }
+    .empty { color: var(--muted); text-align: center; padding: 18px 10px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { font-size: 12px; letter-spacing: 0.02em; color: var(--muted); }
@@ -88,8 +94,8 @@
 </head>
 <body>
   <main>
-    <h1>Active businesses with no website</h1>
-    <p class="lede">Open this page in Google Chrome. Enter a niche and a location. Chrome searches Google Maps and keeps listings that are still operating and have no website.</p>
+    <h1>Google Maps business search</h1>
+    <p class="lede">Open this page in Google Chrome. Enter a niche and a location. Chrome searches Google Maps and reads every listing. Click Checked, No website, Has website or Closed to see that group and download just those results.</p>
     <p class="warn">One search at a time. A large run can temporarily rate-limit this machine’s IP on Google Maps. Phones in the CSV are personal data — use them only in line with the rules where you contact people. Maps searches usually stop around 120 listings.</p>
     <form id="search-form">
       <div class="fields">
@@ -107,13 +113,16 @@
         </div>
         <button id="submit" type="submit">Search Maps</button>
       </div>
-      <p class="hint">A Chrome window opens and reads Google Maps. Closed businesses are dropped. A Facebook, Instagram, or other profile link does not count as a website. Email stays blank because there is no site to read.</p>
+      <p class="hint">A Chrome window opens and reads Google Maps. Closed means permanently or temporarily closed. A Facebook, Instagram, or other profile link does not count as a website. Email stays blank because no website is opened. Each name links to its Maps listing.</p>
     </form>
     <section class="status" id="status" hidden>
       <div class="panel">
         <div class="actions">
           <p id="message" style="margin:0"></p>
-          <a id="download" hidden>Download CSV</a>
+          <div class="downloads">
+            <a id="download-xlsx" hidden>Download Excel</a>
+            <a id="download" hidden>Download CSV</a>
+          </div>
         </div>
         <div class="counts" id="counts"></div>
         <p class="error" id="error" hidden></p>
@@ -128,6 +137,7 @@
                 <th>Rating</th>
                 <th>Reviews</th>
                 <th>Status</th>
+                <th>Result</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -145,7 +155,18 @@
     const counts = document.querySelector("#counts");
     const rows = document.querySelector("#rows");
     const download = document.querySelector("#download");
+    const downloadXlsx = document.querySelector("#download-xlsx");
     let timer = 0;
+    let selected = "checked";
+    let lastJob = null;
+
+    // key matches the server's filter name; result is the label stored on each row.
+    const FILTERS = [
+      { key: "checked", label: "Checked", result: null, count: (job) => job.checked || 0 },
+      { key: "no_website", label: "No website", result: "No website", count: (job) => job.found || 0 },
+      { key: "has_website", label: "Has website", result: "Has website", count: (job) => job.skipped_website || 0 },
+      { key: "closed", label: "Closed", result: "Closed", count: (job) => job.skipped_closed || 0 }
+    ];
 
     function cell(text) {
       const td = document.createElement("td");
@@ -153,50 +174,77 @@
       return td;
     }
 
+    function rowFor(lead) {
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      if (lead.maps_url) {
+        const link = document.createElement("a");
+        link.href = lead.maps_url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = lead.name || "Maps listing";
+        name.append(link);
+      } else {
+        name.textContent = lead.name || "";
+      }
+      tr.append(
+        name,
+        cell(lead.phone),
+        cell(lead.category),
+        cell(lead.address),
+        cell(lead.rating),
+        cell(lead.review_count),
+        cell(lead.status),
+        cell(lead.result)
+      );
+      return tr;
+    }
+
     function render(job) {
+      lastJob = job;
       statusBox.hidden = false;
       message.textContent = job.message || "";
       error.hidden = !job.error;
       error.textContent = job.error || "";
-      const chips = [
-        ["Checked", job.checked || 0],
-        ["No website", job.found || 0],
-        ["Has website", job.skipped_website || 0],
-        ["Closed", job.skipped_closed || 0]
-      ];
-      counts.replaceChildren(...chips.map(([label, value]) => {
-        const span = document.createElement("span");
-        span.textContent = label + ": " + value;
-        return span;
+
+      counts.replaceChildren(...FILTERS.map((filter) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.setAttribute("aria-pressed", String(filter.key === selected));
+        chip.textContent = filter.label + ": " + filter.count(job);
+        chip.addEventListener("click", () => {
+          selected = filter.key;
+          render(lastJob);
+        });
+        return chip;
       }));
-      rows.replaceChildren(...(job.leads || []).map((lead) => {
+
+      const current = FILTERS.find((filter) => filter.key === selected);
+      const shown = (job.rows || []).filter((row) => !current.result || row.result === current.result);
+      if (shown.length) {
+        rows.replaceChildren(...shown.map(rowFor));
+      } else {
         const tr = document.createElement("tr");
-        const name = document.createElement("td");
-        if (lead.maps_url) {
-          const link = document.createElement("a");
-          link.href = lead.maps_url;
-          link.target = "_blank";
-          link.rel = "noreferrer";
-          link.textContent = lead.name || "Maps listing";
-          name.append(link);
-        } else {
-          name.textContent = lead.name || "";
-        }
-        tr.append(
-          name,
-          cell(lead.phone),
-          cell(lead.category),
-          cell(lead.address),
-          cell(lead.rating),
-          cell(lead.review_count),
-          cell(lead.status)
-        );
-        return tr;
-      }));
-      const ready = job.status === "done";
+        const td = document.createElement("td");
+        td.colSpan = 8;
+        td.className = "empty";
+        td.textContent = job.status === "running" ? "Nothing in this group yet." : "Nothing in this group.";
+        tr.append(td);
+        rows.replaceChildren(tr);
+      }
+
+      const ready = job.status === "done" && shown.length > 0;
+      const base = "/api/jobs/" + job.id;
+      const suffix = "?filter=" + selected;
       download.hidden = !ready;
-      if (ready) download.href = "/api/jobs/" + job.id + ".csv";
-      download.textContent = "Download " + (job.csv_name || "CSV");
+      downloadXlsx.hidden = !ready;
+      if (ready) {
+        download.href = base + ".csv" + suffix;
+        downloadXlsx.href = base + ".xlsx" + suffix;
+      }
+      download.textContent = "Download CSV: " + current.label + " (" + shown.length + ")";
+      downloadXlsx.textContent = "Download Excel: " + current.label + " (" + shown.length + ")";
       submit.disabled = job.status === "running";
     }
 

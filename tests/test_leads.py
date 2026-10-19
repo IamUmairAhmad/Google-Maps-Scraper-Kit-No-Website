@@ -1,14 +1,32 @@
 import unittest
 
+import io
+import zipfile
+
 from app.leads import (
     business_website,
+    classify_result,
     classify_status,
+    clickable_maps_url,
+    count_results,
     csv_cell,
+    filter_rows,
     has_website,
     keep_lead,
+    result_filename,
     review_count_from_panel,
     rows_to_csv,
+    rows_to_xlsx,
+    with_result,
 )
+
+ROWS = [
+    {"name": "A", "status": "active", "website": "", "maps_url": "https://www.google.com/maps/place/A"},
+    {"name": "B", "status": "active", "website": "https://b.example", "maps_url": "https://www.google.com/maps/place/B"},
+    {"name": "C", "status": "permanently closed", "website": "", "maps_url": "https://www.google.com/maps/place/C"},
+    {"name": "D", "status": "temporarily closed", "website": "https://d.example", "maps_url": ""},
+    {"name": "E", "status": "active", "website": "https://facebook.com/e", "maps_url": "https://www.google.com/maps/place/E"},
+]
 
 
 class LeadFilterTests(unittest.TestCase):
@@ -65,10 +83,51 @@ class LeadFilterTests(unittest.TestCase):
             }
         ])
         self.assertTrue(text.startswith(
-            "name,phone,email,website,category,address,rating,review_count,status,maps_url,niche,location\n"
+            "name,phone,email,website,category,address,rating,review_count,status,result,maps_url,niche,location\n"
         ))
         self.assertIn("Ada Plumbing", text)
         self.assertIn("Austin, TX", text)
+
+    def test_every_listing_gets_one_result(self):
+        self.assertEqual([classify_result(r) for r in ROWS],
+                         ["No website", "Has website", "Closed", "Closed", "No website"])
+        self.assertEqual(with_result(ROWS[0])["result"], "No website")
+
+    def test_four_filters(self):
+        names = lambda key: [r["name"] for r in filter_rows(ROWS, key)]
+        self.assertEqual(names("checked"), ["A", "B", "C", "D", "E"])
+        self.assertEqual(names("no_website"), ["A", "E"])
+        self.assertEqual(names("has_website"), ["B"])
+        self.assertEqual(names("closed"), ["C", "D"])
+        with self.assertRaises(ValueError):
+            filter_rows(ROWS, "other")
+
+    def test_counts_add_up(self):
+        counts = count_results(ROWS)
+        self.assertEqual(counts, {"checked": 5, "found": 2, "skipped_website": 1, "skipped_closed": 2})
+
+    def test_file_names_follow_the_filter(self):
+        self.assertEqual(result_filename("no_website", "Plumbers", "Austin, TX"), "no-website-plumbers-austin-tx.csv")
+        self.assertEqual(result_filename("checked", "a", "b", "xlsx"), "all-checked-a-b.xlsx")
+
+    def test_long_maps_links_fall_back_to_a_short_cid_link(self):
+        self.assertEqual(clickable_maps_url("javascript:alert(1)"), "")
+        long_url = "https://www.google.com/maps/place/X/data=!1s0x89c:0xff!8m2" + "a" * 2100
+        self.assertEqual(clickable_maps_url(long_url), "https://www.google.com/maps?cid=255")
+
+    def test_excel_names_link_to_maps_and_never_become_formulas(self):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        rows = [with_result(dict(ROWS[0], name="=HYPERLINK(\"http://evil\")")), with_result(ROWS[3])]
+        data = rows_to_xlsx(rows)
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
+        sheet = load_workbook(io.BytesIO(data)).active
+        self.assertEqual(sheet["A1"].value, "name")
+        self.assertEqual(sheet["A2"].hyperlink.target, "https://www.google.com/maps/place/A")
+        self.assertNotEqual(sheet["A2"].data_type, "f")
+        self.assertIsNone(sheet["A3"].hyperlink)  # no Maps link for that row
 
 
 if __name__ == "__main__":

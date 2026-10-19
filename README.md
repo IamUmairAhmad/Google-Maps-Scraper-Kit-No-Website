@@ -4,6 +4,16 @@ Open a local page in Google Chrome, enter a niche and a location, and download a
 
 A Google Chrome window opens for the search. Closed and temporarily closed listings are dropped. A Facebook, Instagram, or other profile link does not count as a website. Email stays blank because there is no site to read. One Maps search usually stops around 120 listings.
 
+## One-click launch
+
+Install Python 3 and Google Chrome, then double-click the launcher for your system:
+
+- Windows: `Start-Windows.bat`
+- Mac: `Start-Mac.command` (first time: right-click, Open)
+- Linux: `Start-Linux.sh`
+
+The first run sets up a private environment and installs requirements, then opens the search in Chrome.
+
 ## Run
 
 ```bash

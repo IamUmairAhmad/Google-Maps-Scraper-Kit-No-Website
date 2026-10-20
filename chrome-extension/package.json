@@ -1,0 +1,8 @@
+{
+  "name": "google-maps-business-search-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/leads.test.mjs"
+  }
+}

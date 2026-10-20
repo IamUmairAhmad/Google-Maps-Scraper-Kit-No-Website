@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Maps business search</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main>
+    <h1>Google Maps business search</h1>
+    <p class="lede">Enter a niche and a location. A small Chrome window opens Google Maps and reads every listing. Click Checked, No website, Has website or Closed to see that group and download just those results.</p>
+    <p class="warn">Keep this tab open while a search runs, and leave the small Maps window alone (you can keep working in other windows). One search at a time. A large run can temporarily rate-limit your IP on Google Maps. Phones in the files are personal data — use them only in line with the rules where you contact people. Maps searches usually stop around 120 listings.</p>
+    <form id="search-form">
+      <div class="fields">
+        <div>
+          <label for="niche">Niche</label>
+          <input id="niche" name="niche" required maxlength="80" placeholder="plumbers" autocomplete="off">
+        </div>
+        <div>
+          <label for="location">Location</label>
+          <input id="location" name="location" required maxlength="80" placeholder="Austin, TX" autocomplete="off">
+        </div>
+        <div>
+          <label for="limit">Listings to check</label>
+          <input id="limit" name="limit" type="number" min="1" max="120" value="25" required>
+        </div>
+        <div class="buttons">
+          <button id="submit" type="submit">Search Maps</button>
+          <button id="stop" type="button" class="secondary" hidden>Stop</button>
+        </div>
+      </div>
+      <p class="hint">Closed means permanently or temporarily closed. A Facebook, Instagram, or other profile link does not count as a website. Email stays blank because no website is opened. In the Excel file each name links to its Maps listing; CSV files keep the link in the maps_url column.</p>
+    </form>
+    <section class="status" id="status" hidden>
+      <div class="panel">
+        <div class="actions">
+          <p id="message" class="message"></p>
+          <div class="downloads">
+            <a id="download-xlsx" hidden>Download Excel</a>
+            <a id="download" hidden>Download CSV</a>
+          </div>
+        </div>
+        <div class="counts" id="counts"></div>
+        <p class="error" id="error" hidden></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Category</th>
+                <th>Address</th>
+                <th>Rating</th>
+                <th>Reviews</th>
+                <th>Status</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

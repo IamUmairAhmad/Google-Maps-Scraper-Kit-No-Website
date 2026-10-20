@@ -17,6 +17,10 @@ The page shows four buttons with counts:
 
 Pick a button, then use **Download CSV** or **Download Excel**. The file holds just that group. In the Excel file each Name is a clickable link to its Google Maps listing (CSV files keep the link in the `maps_url` column). Email stays blank because no website is opened. One Maps search usually stops around 120 listings.
 
+## Chrome extension
+
+The same search is also available as a Google Chrome extension in [`chrome-extension/`](chrome-extension/). It runs in your own Chrome (no Python needed), with the same four buttons and per-group CSV and Excel downloads. See [`chrome-extension/README.md`](chrome-extension/README.md) for install steps.
+
 ## One-click launch
 
 Install Python 3 and Google Chrome, then double-click the launcher for your system:
